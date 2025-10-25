@@ -1,7 +1,8 @@
 {
   "name": "MSITE Inventory System",
   "short_name": "MSITE",
-  "start_url": "index.html",
+  "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#004b8d",
   "theme_color": "#004b8d",
