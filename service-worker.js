@@ -1,5 +1,5 @@
 
-const CACHE_NAME = 'msite-cache-v2';
+const CACHE_NAME = 'msite-cache-final-v1';
 const urlsToCache = [
   './',
   './index.html',

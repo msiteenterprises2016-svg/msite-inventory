@@ -1041,76 +1041,88 @@ function printBuyList() {
   w.document.write('<html><head><title>Buy List</title></head><body>');
   w.document.write(html);
   w.document.write('
-<!-- Firebase compat SDKs -->
+<!-- Firebase (compat) SDKs and initialization - injected by assistant -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  firebase.initializeApp(firebaseConfig);
+  // Initialize Firebase (compat mode)
+  const firebaseConfig = {"apiKey": "AIzaSyC36jo_Ol_PM3HDygz0SnisgAhLRomoejk", "authDomain": "msite-4db05.firebaseapp.com", "projectId": "msite-4db05", "storageBucket": "msite-4db05.firebasestorage.app", "messagingSenderId": "13176985563", "appId": "1:13176985563:web:2b7eb611ac70426035f9fe", "measurementId": "G-R5PWB2REMQ"};
+  if (!window.firebase || !window.firebase.apps || window.firebase.apps.length === 0) {
+    firebase.initializeApp(firebaseConfig);
+  } else {
+    console.info('Firebase already initialized');
+  }
   const db = firebase.firestore();
 
-  // === Firestore Auto Sync Logic ===
-  let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
-  const stockCol = db.collection('stock');
+  // Auto-sync local stockData to Firestore when online (keeps local data)
+  try {
+    let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
+    const stockCol = db.collection('stock');
+    function saveLocalStock() { localStorage.setItem('stockData', JSON.stringify(localStock)); }
 
-  function saveLocal() {
-    localStorage.setItem('stockData', JSON.stringify(localStock));
-  }
-
-  async function uploadLocalPending() {
-    if(!navigator.onLine) return;
-    try {
-      const snapshot = await stockCol.get();
-      if(snapshot.empty && localStock.length>0) {
-        for(const item of localStock) {
-          const docRef = await stockCol.add(item);
-          item.id = docRef.id;
+    async function uploadLocalPending() {
+      if (!navigator.onLine) return;
+      try {
+        const snapshot = await stockCol.get();
+        if (snapshot.empty && localStock.length > 0) {
+          for (const item of localStock) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          }
+          saveLocalStock();
         }
-        saveLocal();
-      }
-    } catch(e) {
-      console.warn('uploadLocalPending failed', e);
+      } catch (e) { console.warn('uploadLocalPending failed', e); }
     }
-  }
 
-  function startCloudListener() {
-    stockCol.onSnapshot(snapshot => {
-      const cloudItems = [];
-      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-      if(cloudItems.length>0) {
-        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
-        localStock = cloudItems.concat(localOnly);
-        saveLocal();
-        if(typeof renderStock === 'function') renderStock();
+    function startCloudListener() {
+      try {
+        stockCol.onSnapshot(snapshot => {
+          const cloudItems = [];
+          snapshot.forEach(doc => cloudItems.push(Object.assign({ id: doc.id }, doc.data())));
+          if (cloudItems.length > 0) {
+            const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name === ls.name && ci.qty === ls.qty));
+            localStock = cloudItems.concat(localOnly);
+            saveLocalStock();
+            if (typeof renderStock === 'function') renderStock();
+            if (typeof updateItemLists === 'function') updateItemLists();
+          } else {
+            if (typeof renderStock === 'function') renderStock();
+          }
+        }, err => console.warn('onSnapshot error', err));
+      } catch (e) {
+        console.warn('startCloudListener failed', e);
       }
+    }
+
+    window.addEventListener('online', async () => {
+      console.info('Back online — syncing local stock to Firestore...');
+      try {
+        const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+        for (const item of local) {
+          if (!item.id) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          } else {
+            try { await stockCol.doc(item.id).set({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 }); } catch(e) {}
+          }
+        }
+        localStorage.setItem('stockData', JSON.stringify(local));
+      } catch(e) { console.warn('Error syncing on online', e); }
+      startCloudListener();
     });
-  }
 
-  window.addEventListener('online', async () => {
-    console.info('Online: syncing local stock to Firestore...');
-    try {
-      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
-      for(const item of local) {
-        if(!item.id) {
-          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-          item.id = docRef.id;
-        } else {
-          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-        }
+    (function initSync() {
+      if (navigator.onLine) {
+        uploadLocalPending().then(() => startCloudListener());
+      } else {
+        console.info('Offline at init — using local data for now');
       }
-      localStorage.setItem('stockData', JSON.stringify(local));
-    } catch(e) { console.warn('Error syncing online', e); }
-    startCloudListener();
-  });
-
-  (function initSync() {
-    if(navigator.onLine) {
-      uploadLocalPending().then(() => startCloudListener());
-    } else {
-      console.info('Offline at init, using local data');
-    }
-  })();
+    })();
+  } catch(e) {
+    console.warn('Auto-sync init error', e);
+  }
 </script>
+<!-- End injected Firebase block -->
 
 </body></html>');
   w.document.close();
@@ -1516,76 +1528,88 @@ function confirmBuyList() {
         <div class="preview-wrap">${receiptHTML}</div>
         ${script}
       
-<!-- Firebase compat SDKs -->
+<!-- Firebase (compat) SDKs and initialization - injected by assistant -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  firebase.initializeApp(firebaseConfig);
+  // Initialize Firebase (compat mode)
+  const firebaseConfig = {"apiKey": "AIzaSyC36jo_Ol_PM3HDygz0SnisgAhLRomoejk", "authDomain": "msite-4db05.firebaseapp.com", "projectId": "msite-4db05", "storageBucket": "msite-4db05.firebasestorage.app", "messagingSenderId": "13176985563", "appId": "1:13176985563:web:2b7eb611ac70426035f9fe", "measurementId": "G-R5PWB2REMQ"};
+  if (!window.firebase || !window.firebase.apps || window.firebase.apps.length === 0) {
+    firebase.initializeApp(firebaseConfig);
+  } else {
+    console.info('Firebase already initialized');
+  }
   const db = firebase.firestore();
 
-  // === Firestore Auto Sync Logic ===
-  let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
-  const stockCol = db.collection('stock');
+  // Auto-sync local stockData to Firestore when online (keeps local data)
+  try {
+    let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
+    const stockCol = db.collection('stock');
+    function saveLocalStock() { localStorage.setItem('stockData', JSON.stringify(localStock)); }
 
-  function saveLocal() {
-    localStorage.setItem('stockData', JSON.stringify(localStock));
-  }
-
-  async function uploadLocalPending() {
-    if(!navigator.onLine) return;
-    try {
-      const snapshot = await stockCol.get();
-      if(snapshot.empty && localStock.length>0) {
-        for(const item of localStock) {
-          const docRef = await stockCol.add(item);
-          item.id = docRef.id;
+    async function uploadLocalPending() {
+      if (!navigator.onLine) return;
+      try {
+        const snapshot = await stockCol.get();
+        if (snapshot.empty && localStock.length > 0) {
+          for (const item of localStock) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          }
+          saveLocalStock();
         }
-        saveLocal();
-      }
-    } catch(e) {
-      console.warn('uploadLocalPending failed', e);
+      } catch (e) { console.warn('uploadLocalPending failed', e); }
     }
-  }
 
-  function startCloudListener() {
-    stockCol.onSnapshot(snapshot => {
-      const cloudItems = [];
-      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-      if(cloudItems.length>0) {
-        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
-        localStock = cloudItems.concat(localOnly);
-        saveLocal();
-        if(typeof renderStock === 'function') renderStock();
+    function startCloudListener() {
+      try {
+        stockCol.onSnapshot(snapshot => {
+          const cloudItems = [];
+          snapshot.forEach(doc => cloudItems.push(Object.assign({ id: doc.id }, doc.data())));
+          if (cloudItems.length > 0) {
+            const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name === ls.name && ci.qty === ls.qty));
+            localStock = cloudItems.concat(localOnly);
+            saveLocalStock();
+            if (typeof renderStock === 'function') renderStock();
+            if (typeof updateItemLists === 'function') updateItemLists();
+          } else {
+            if (typeof renderStock === 'function') renderStock();
+          }
+        }, err => console.warn('onSnapshot error', err));
+      } catch (e) {
+        console.warn('startCloudListener failed', e);
       }
+    }
+
+    window.addEventListener('online', async () => {
+      console.info('Back online — syncing local stock to Firestore...');
+      try {
+        const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+        for (const item of local) {
+          if (!item.id) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          } else {
+            try { await stockCol.doc(item.id).set({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 }); } catch(e) {}
+          }
+        }
+        localStorage.setItem('stockData', JSON.stringify(local));
+      } catch(e) { console.warn('Error syncing on online', e); }
+      startCloudListener();
     });
-  }
 
-  window.addEventListener('online', async () => {
-    console.info('Online: syncing local stock to Firestore...');
-    try {
-      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
-      for(const item of local) {
-        if(!item.id) {
-          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-          item.id = docRef.id;
-        } else {
-          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-        }
+    (function initSync() {
+      if (navigator.onLine) {
+        uploadLocalPending().then(() => startCloudListener());
+      } else {
+        console.info('Offline at init — using local data for now');
       }
-      localStorage.setItem('stockData', JSON.stringify(local));
-    } catch(e) { console.warn('Error syncing online', e); }
-    startCloudListener();
-  });
-
-  (function initSync() {
-    if(navigator.onLine) {
-      uploadLocalPending().then(() => startCloudListener());
-    } else {
-      console.info('Offline at init, using local data');
-    }
-  })();
+    })();
+  } catch(e) {
+    console.warn('Auto-sync init error', e);
+  }
 </script>
+<!-- End injected Firebase block -->
 
 </body></html>`);
       w.document.close();
@@ -1615,76 +1639,88 @@ function confirmBuyList() {
   const html = document.getElementById('cashout-receipt').innerHTML;
   const w = window.open('', '_blank');
   w.document.write(`<html><head><title>Print</title></head><body>${html}
-<!-- Firebase compat SDKs -->
+<!-- Firebase (compat) SDKs and initialization - injected by assistant -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  firebase.initializeApp(firebaseConfig);
+  // Initialize Firebase (compat mode)
+  const firebaseConfig = {"apiKey": "AIzaSyC36jo_Ol_PM3HDygz0SnisgAhLRomoejk", "authDomain": "msite-4db05.firebaseapp.com", "projectId": "msite-4db05", "storageBucket": "msite-4db05.firebasestorage.app", "messagingSenderId": "13176985563", "appId": "1:13176985563:web:2b7eb611ac70426035f9fe", "measurementId": "G-R5PWB2REMQ"};
+  if (!window.firebase || !window.firebase.apps || window.firebase.apps.length === 0) {
+    firebase.initializeApp(firebaseConfig);
+  } else {
+    console.info('Firebase already initialized');
+  }
   const db = firebase.firestore();
 
-  // === Firestore Auto Sync Logic ===
-  let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
-  const stockCol = db.collection('stock');
+  // Auto-sync local stockData to Firestore when online (keeps local data)
+  try {
+    let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
+    const stockCol = db.collection('stock');
+    function saveLocalStock() { localStorage.setItem('stockData', JSON.stringify(localStock)); }
 
-  function saveLocal() {
-    localStorage.setItem('stockData', JSON.stringify(localStock));
-  }
-
-  async function uploadLocalPending() {
-    if(!navigator.onLine) return;
-    try {
-      const snapshot = await stockCol.get();
-      if(snapshot.empty && localStock.length>0) {
-        for(const item of localStock) {
-          const docRef = await stockCol.add(item);
-          item.id = docRef.id;
+    async function uploadLocalPending() {
+      if (!navigator.onLine) return;
+      try {
+        const snapshot = await stockCol.get();
+        if (snapshot.empty && localStock.length > 0) {
+          for (const item of localStock) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          }
+          saveLocalStock();
         }
-        saveLocal();
-      }
-    } catch(e) {
-      console.warn('uploadLocalPending failed', e);
+      } catch (e) { console.warn('uploadLocalPending failed', e); }
     }
-  }
 
-  function startCloudListener() {
-    stockCol.onSnapshot(snapshot => {
-      const cloudItems = [];
-      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-      if(cloudItems.length>0) {
-        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
-        localStock = cloudItems.concat(localOnly);
-        saveLocal();
-        if(typeof renderStock === 'function') renderStock();
+    function startCloudListener() {
+      try {
+        stockCol.onSnapshot(snapshot => {
+          const cloudItems = [];
+          snapshot.forEach(doc => cloudItems.push(Object.assign({ id: doc.id }, doc.data())));
+          if (cloudItems.length > 0) {
+            const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name === ls.name && ci.qty === ls.qty));
+            localStock = cloudItems.concat(localOnly);
+            saveLocalStock();
+            if (typeof renderStock === 'function') renderStock();
+            if (typeof updateItemLists === 'function') updateItemLists();
+          } else {
+            if (typeof renderStock === 'function') renderStock();
+          }
+        }, err => console.warn('onSnapshot error', err));
+      } catch (e) {
+        console.warn('startCloudListener failed', e);
       }
+    }
+
+    window.addEventListener('online', async () => {
+      console.info('Back online — syncing local stock to Firestore...');
+      try {
+        const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+        for (const item of local) {
+          if (!item.id) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          } else {
+            try { await stockCol.doc(item.id).set({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 }); } catch(e) {}
+          }
+        }
+        localStorage.setItem('stockData', JSON.stringify(local));
+      } catch(e) { console.warn('Error syncing on online', e); }
+      startCloudListener();
     });
-  }
 
-  window.addEventListener('online', async () => {
-    console.info('Online: syncing local stock to Firestore...');
-    try {
-      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
-      for(const item of local) {
-        if(!item.id) {
-          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-          item.id = docRef.id;
-        } else {
-          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-        }
+    (function initSync() {
+      if (navigator.onLine) {
+        uploadLocalPending().then(() => startCloudListener());
+      } else {
+        console.info('Offline at init — using local data for now');
       }
-      localStorage.setItem('stockData', JSON.stringify(local));
-    } catch(e) { console.warn('Error syncing online', e); }
-    startCloudListener();
-  });
-
-  (function initSync() {
-    if(navigator.onLine) {
-      uploadLocalPending().then(() => startCloudListener());
-    } else {
-      console.info('Offline at init, using local data');
-    }
-  })();
+    })();
+  } catch(e) {
+    console.warn('Auto-sync init error', e);
+  }
 </script>
+<!-- End injected Firebase block -->
 
 </body></html>`);
   w.document.close();
@@ -1820,76 +1856,88 @@ function confirmBuyList() {
   const html = container.innerHTML;
   const w = window.open('', '_blank');
   w.document.write(`<html><head><title>Print</title></head><body>${html}
-<!-- Firebase compat SDKs -->
+<!-- Firebase (compat) SDKs and initialization - injected by assistant -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  firebase.initializeApp(firebaseConfig);
+  // Initialize Firebase (compat mode)
+  const firebaseConfig = {"apiKey": "AIzaSyC36jo_Ol_PM3HDygz0SnisgAhLRomoejk", "authDomain": "msite-4db05.firebaseapp.com", "projectId": "msite-4db05", "storageBucket": "msite-4db05.firebasestorage.app", "messagingSenderId": "13176985563", "appId": "1:13176985563:web:2b7eb611ac70426035f9fe", "measurementId": "G-R5PWB2REMQ"};
+  if (!window.firebase || !window.firebase.apps || window.firebase.apps.length === 0) {
+    firebase.initializeApp(firebaseConfig);
+  } else {
+    console.info('Firebase already initialized');
+  }
   const db = firebase.firestore();
 
-  // === Firestore Auto Sync Logic ===
-  let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
-  const stockCol = db.collection('stock');
+  // Auto-sync local stockData to Firestore when online (keeps local data)
+  try {
+    let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
+    const stockCol = db.collection('stock');
+    function saveLocalStock() { localStorage.setItem('stockData', JSON.stringify(localStock)); }
 
-  function saveLocal() {
-    localStorage.setItem('stockData', JSON.stringify(localStock));
-  }
-
-  async function uploadLocalPending() {
-    if(!navigator.onLine) return;
-    try {
-      const snapshot = await stockCol.get();
-      if(snapshot.empty && localStock.length>0) {
-        for(const item of localStock) {
-          const docRef = await stockCol.add(item);
-          item.id = docRef.id;
+    async function uploadLocalPending() {
+      if (!navigator.onLine) return;
+      try {
+        const snapshot = await stockCol.get();
+        if (snapshot.empty && localStock.length > 0) {
+          for (const item of localStock) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          }
+          saveLocalStock();
         }
-        saveLocal();
-      }
-    } catch(e) {
-      console.warn('uploadLocalPending failed', e);
+      } catch (e) { console.warn('uploadLocalPending failed', e); }
     }
-  }
 
-  function startCloudListener() {
-    stockCol.onSnapshot(snapshot => {
-      const cloudItems = [];
-      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-      if(cloudItems.length>0) {
-        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
-        localStock = cloudItems.concat(localOnly);
-        saveLocal();
-        if(typeof renderStock === 'function') renderStock();
+    function startCloudListener() {
+      try {
+        stockCol.onSnapshot(snapshot => {
+          const cloudItems = [];
+          snapshot.forEach(doc => cloudItems.push(Object.assign({ id: doc.id }, doc.data())));
+          if (cloudItems.length > 0) {
+            const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name === ls.name && ci.qty === ls.qty));
+            localStock = cloudItems.concat(localOnly);
+            saveLocalStock();
+            if (typeof renderStock === 'function') renderStock();
+            if (typeof updateItemLists === 'function') updateItemLists();
+          } else {
+            if (typeof renderStock === 'function') renderStock();
+          }
+        }, err => console.warn('onSnapshot error', err));
+      } catch (e) {
+        console.warn('startCloudListener failed', e);
       }
+    }
+
+    window.addEventListener('online', async () => {
+      console.info('Back online — syncing local stock to Firestore...');
+      try {
+        const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+        for (const item of local) {
+          if (!item.id) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          } else {
+            try { await stockCol.doc(item.id).set({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 }); } catch(e) {}
+          }
+        }
+        localStorage.setItem('stockData', JSON.stringify(local));
+      } catch(e) { console.warn('Error syncing on online', e); }
+      startCloudListener();
     });
-  }
 
-  window.addEventListener('online', async () => {
-    console.info('Online: syncing local stock to Firestore...');
-    try {
-      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
-      for(const item of local) {
-        if(!item.id) {
-          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-          item.id = docRef.id;
-        } else {
-          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-        }
+    (function initSync() {
+      if (navigator.onLine) {
+        uploadLocalPending().then(() => startCloudListener());
+      } else {
+        console.info('Offline at init — using local data for now');
       }
-      localStorage.setItem('stockData', JSON.stringify(local));
-    } catch(e) { console.warn('Error syncing online', e); }
-    startCloudListener();
-  });
-
-  (function initSync() {
-    if(navigator.onLine) {
-      uploadLocalPending().then(() => startCloudListener());
-    } else {
-      console.info('Offline at init, using local data');
-    }
-  })();
+    })();
+  } catch(e) {
+    console.warn('Auto-sync init error', e);
+  }
 </script>
+<!-- End injected Firebase block -->
 
 </body></html>`);
   w.document.close();
@@ -2028,76 +2076,88 @@ function printStockTable() {
           Printed on: ${new Date().toLocaleString()}
         </div>
       
-<!-- Firebase compat SDKs -->
+<!-- Firebase (compat) SDKs and initialization - injected by assistant -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  firebase.initializeApp(firebaseConfig);
+  // Initialize Firebase (compat mode)
+  const firebaseConfig = {"apiKey": "AIzaSyC36jo_Ol_PM3HDygz0SnisgAhLRomoejk", "authDomain": "msite-4db05.firebaseapp.com", "projectId": "msite-4db05", "storageBucket": "msite-4db05.firebasestorage.app", "messagingSenderId": "13176985563", "appId": "1:13176985563:web:2b7eb611ac70426035f9fe", "measurementId": "G-R5PWB2REMQ"};
+  if (!window.firebase || !window.firebase.apps || window.firebase.apps.length === 0) {
+    firebase.initializeApp(firebaseConfig);
+  } else {
+    console.info('Firebase already initialized');
+  }
   const db = firebase.firestore();
 
-  // === Firestore Auto Sync Logic ===
-  let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
-  const stockCol = db.collection('stock');
+  // Auto-sync local stockData to Firestore when online (keeps local data)
+  try {
+    let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
+    const stockCol = db.collection('stock');
+    function saveLocalStock() { localStorage.setItem('stockData', JSON.stringify(localStock)); }
 
-  function saveLocal() {
-    localStorage.setItem('stockData', JSON.stringify(localStock));
-  }
-
-  async function uploadLocalPending() {
-    if(!navigator.onLine) return;
-    try {
-      const snapshot = await stockCol.get();
-      if(snapshot.empty && localStock.length>0) {
-        for(const item of localStock) {
-          const docRef = await stockCol.add(item);
-          item.id = docRef.id;
+    async function uploadLocalPending() {
+      if (!navigator.onLine) return;
+      try {
+        const snapshot = await stockCol.get();
+        if (snapshot.empty && localStock.length > 0) {
+          for (const item of localStock) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          }
+          saveLocalStock();
         }
-        saveLocal();
-      }
-    } catch(e) {
-      console.warn('uploadLocalPending failed', e);
+      } catch (e) { console.warn('uploadLocalPending failed', e); }
     }
-  }
 
-  function startCloudListener() {
-    stockCol.onSnapshot(snapshot => {
-      const cloudItems = [];
-      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-      if(cloudItems.length>0) {
-        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
-        localStock = cloudItems.concat(localOnly);
-        saveLocal();
-        if(typeof renderStock === 'function') renderStock();
+    function startCloudListener() {
+      try {
+        stockCol.onSnapshot(snapshot => {
+          const cloudItems = [];
+          snapshot.forEach(doc => cloudItems.push(Object.assign({ id: doc.id }, doc.data())));
+          if (cloudItems.length > 0) {
+            const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name === ls.name && ci.qty === ls.qty));
+            localStock = cloudItems.concat(localOnly);
+            saveLocalStock();
+            if (typeof renderStock === 'function') renderStock();
+            if (typeof updateItemLists === 'function') updateItemLists();
+          } else {
+            if (typeof renderStock === 'function') renderStock();
+          }
+        }, err => console.warn('onSnapshot error', err));
+      } catch (e) {
+        console.warn('startCloudListener failed', e);
       }
+    }
+
+    window.addEventListener('online', async () => {
+      console.info('Back online — syncing local stock to Firestore...');
+      try {
+        const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+        for (const item of local) {
+          if (!item.id) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          } else {
+            try { await stockCol.doc(item.id).set({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 }); } catch(e) {}
+          }
+        }
+        localStorage.setItem('stockData', JSON.stringify(local));
+      } catch(e) { console.warn('Error syncing on online', e); }
+      startCloudListener();
     });
-  }
 
-  window.addEventListener('online', async () => {
-    console.info('Online: syncing local stock to Firestore...');
-    try {
-      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
-      for(const item of local) {
-        if(!item.id) {
-          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-          item.id = docRef.id;
-        } else {
-          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-        }
+    (function initSync() {
+      if (navigator.onLine) {
+        uploadLocalPending().then(() => startCloudListener());
+      } else {
+        console.info('Offline at init — using local data for now');
       }
-      localStorage.setItem('stockData', JSON.stringify(local));
-    } catch(e) { console.warn('Error syncing online', e); }
-    startCloudListener();
-  });
-
-  (function initSync() {
-    if(navigator.onLine) {
-      uploadLocalPending().then(() => startCloudListener());
-    } else {
-      console.info('Offline at init, using local data');
-    }
-  })();
+    })();
+  } catch(e) {
+    console.warn('Auto-sync init error', e);
+  }
 </script>
+<!-- End injected Firebase block -->
 
 </body>
     </html>
@@ -2130,76 +2190,88 @@ if ('serviceWorker' in navigator) {
 }
 
 
-<!-- Firebase compat SDKs -->
+<!-- Firebase (compat) SDKs and initialization - injected by assistant -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  firebase.initializeApp(firebaseConfig);
+  // Initialize Firebase (compat mode)
+  const firebaseConfig = {"apiKey": "AIzaSyC36jo_Ol_PM3HDygz0SnisgAhLRomoejk", "authDomain": "msite-4db05.firebaseapp.com", "projectId": "msite-4db05", "storageBucket": "msite-4db05.firebasestorage.app", "messagingSenderId": "13176985563", "appId": "1:13176985563:web:2b7eb611ac70426035f9fe", "measurementId": "G-R5PWB2REMQ"};
+  if (!window.firebase || !window.firebase.apps || window.firebase.apps.length === 0) {
+    firebase.initializeApp(firebaseConfig);
+  } else {
+    console.info('Firebase already initialized');
+  }
   const db = firebase.firestore();
 
-  // === Firestore Auto Sync Logic ===
-  let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
-  const stockCol = db.collection('stock');
+  // Auto-sync local stockData to Firestore when online (keeps local data)
+  try {
+    let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
+    const stockCol = db.collection('stock');
+    function saveLocalStock() { localStorage.setItem('stockData', JSON.stringify(localStock)); }
 
-  function saveLocal() {
-    localStorage.setItem('stockData', JSON.stringify(localStock));
-  }
-
-  async function uploadLocalPending() {
-    if(!navigator.onLine) return;
-    try {
-      const snapshot = await stockCol.get();
-      if(snapshot.empty && localStock.length>0) {
-        for(const item of localStock) {
-          const docRef = await stockCol.add(item);
-          item.id = docRef.id;
+    async function uploadLocalPending() {
+      if (!navigator.onLine) return;
+      try {
+        const snapshot = await stockCol.get();
+        if (snapshot.empty && localStock.length > 0) {
+          for (const item of localStock) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          }
+          saveLocalStock();
         }
-        saveLocal();
-      }
-    } catch(e) {
-      console.warn('uploadLocalPending failed', e);
+      } catch (e) { console.warn('uploadLocalPending failed', e); }
     }
-  }
 
-  function startCloudListener() {
-    stockCol.onSnapshot(snapshot => {
-      const cloudItems = [];
-      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-      if(cloudItems.length>0) {
-        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
-        localStock = cloudItems.concat(localOnly);
-        saveLocal();
-        if(typeof renderStock === 'function') renderStock();
+    function startCloudListener() {
+      try {
+        stockCol.onSnapshot(snapshot => {
+          const cloudItems = [];
+          snapshot.forEach(doc => cloudItems.push(Object.assign({ id: doc.id }, doc.data())));
+          if (cloudItems.length > 0) {
+            const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name === ls.name && ci.qty === ls.qty));
+            localStock = cloudItems.concat(localOnly);
+            saveLocalStock();
+            if (typeof renderStock === 'function') renderStock();
+            if (typeof updateItemLists === 'function') updateItemLists();
+          } else {
+            if (typeof renderStock === 'function') renderStock();
+          }
+        }, err => console.warn('onSnapshot error', err));
+      } catch (e) {
+        console.warn('startCloudListener failed', e);
       }
+    }
+
+    window.addEventListener('online', async () => {
+      console.info('Back online — syncing local stock to Firestore...');
+      try {
+        const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+        for (const item of local) {
+          if (!item.id) {
+            const docRef = await stockCol.add({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 });
+            item.id = docRef.id;
+          } else {
+            try { await stockCol.doc(item.id).set({ name: item.name, qty: item.qty, unit: item.unit||'', price: item.price||0 }); } catch(e) {}
+          }
+        }
+        localStorage.setItem('stockData', JSON.stringify(local));
+      } catch(e) { console.warn('Error syncing on online', e); }
+      startCloudListener();
     });
-  }
 
-  window.addEventListener('online', async () => {
-    console.info('Online: syncing local stock to Firestore...');
-    try {
-      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
-      for(const item of local) {
-        if(!item.id) {
-          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-          item.id = docRef.id;
-        } else {
-          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
-        }
+    (function initSync() {
+      if (navigator.onLine) {
+        uploadLocalPending().then(() => startCloudListener());
+      } else {
+        console.info('Offline at init — using local data for now');
       }
-      localStorage.setItem('stockData', JSON.stringify(local));
-    } catch(e) { console.warn('Error syncing online', e); }
-    startCloudListener();
-  });
-
-  (function initSync() {
-    if(navigator.onLine) {
-      uploadLocalPending().then(() => startCloudListener());
-    } else {
-      console.info('Offline at init, using local data');
-    }
-  })();
+    })();
+  } catch(e) {
+    console.warn('Auto-sync init error', e);
+  }
 </script>
+<!-- End injected Firebase block -->
 
 </body>
 </html>
