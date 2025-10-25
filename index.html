@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MSITE Inventory System (Firestore)</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#004b8d">
+  <link rel="icon" href="msite.png" type="image/png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    :root {
+      --msite-blue: #004b8d;
+      --msite-blue-2: #006bb3;
+      --accent: #00bfa5;
+      --danger: #e63946;
+    }
+    body{ font-family: "Segoe UI", sans-serif; margin:0; background:#f5faff; color:#222; }
+    .topbar{height:60px;background:linear-gradient(135deg,var(--msite-blue),var(--msite-blue-2));color:#fff;display:flex;align-items:center;padding:0 20px;position:fixed;left:0;right:0;top:0;z-index:1000}
+    .content{display:flex;margin-top:60px;min-height:calc(100vh - 60px)}
+    .sidebar{width:220px;background:var(--msite-blue);color:#fff;padding:20px;box-sizing:border-box;height:calc(100vh - 60px)}
+    .sidebar img{width:100px;display:block;margin:0 auto 10px}
+    .sidebar a{display:block;color:#fff;text-decoration:none;padding:10px;border-radius:6px;margin-bottom:6px}
+    .main{flex:1;padding:24px}
+    .section{background:#fff;border-radius:12px;padding:20px;box-shadow:0 3px 8px rgba(0,0,0,0.06);margin-bottom:20px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border:1px solid #eee;text-align:center}
+    th{background:var(--msite-blue);color:#fff}
+    button{background:var(--msite-blue-2);color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+    .action-btn{padding:6px 10px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <img src="msite.png" style="width:36px;height:36px;border-radius:6px">
+      <div><strong>MSITE Inventory System</strong></div>
+    </div>
+  </header>
+
+  <div class="content">
+    <aside class="sidebar">
+      <img src="msite.png" alt="logo">
+      <h2 style="text-align:center">MSITE</h2>
+      <a href="#" class="menu-link active" data-section="home-section"><i class="fas fa-home"></i> Home</a>
+      <a href="#" class="menu-link" data-section="stock-section"><i class="fas fa-boxes-stacked"></i> Stock Management</a>
+      <a href="#" class="menu-link" data-section="purchase-section"><i class="fas fa-file-invoice-dollar"></i> Purchase Order</a>
+      <a href="#" class="menu-link" data-section="cashout-section"><i class="fas fa-cash-register"></i> Cashout</a>
+    </aside>
+
+    <main class="main">
+      <div id="home-section" class="section active">
+        <h1>Welcome — MSITE Inventory (Firestore)</h1>
+        <p>This build syncs <strong>Stock</strong> with Firebase Firestore (auto-sync) while keeping other features offline-first.</p>
+      </div>
+
+      <div id="stock-section" class="section">
+        <h1>Stock Management</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <input id="stock-name" placeholder="Item Name">
+          <input id="stock-qty" type="number" placeholder="Quantity" style="width:120px">
+          <input id="stock-unit" placeholder="Unit" style="width:100px">
+          <input id="stock-price" type="number" placeholder="Price" style="width:120px">
+          <button id="addStockBtn">Add Item</button>
+          <button id="syncBtn" style="background:var(--accent)">Sync Now</button>
+        </div>
+
+        <div style="margin-bottom:10px">
+          <input id="stock-search" placeholder="Search item..." style="width:320px;padding:8px;border-radius:6px;border:1px solid #ccc">
+        </div>
+
+        <table id="stockTable">
+          <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Price</th><th>Action</th></tr></thead>
+          <tbody id="stockTableBody"></tbody>
+        </table>
+      </div>
+
+      <div id="purchase-section" class="section">
+        <h1>Purchase Order</h1>
+        <p>Purchase Order, Cashout, Sales still work locally (localStorage). Stock is cloud-synced.</p>
+      </div>
+
+      <div id="cashout-section" class="section">
+        <h1>Cashout</h1>
+        <p>Use existing UI; data saved locally for now.</p>
+      </div>
+    </main>
+  </div>
+
+  <footer style="text-align:center;padding:12px;background:var(--msite-blue);color:#fff">Mr. Michael Martinez | Since 2016</footer>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js"></script>
+
+  <script>
+    // Firebase config (from user) - placeholders inserted
+    const firebaseConfig = {{
+      apiKey: "AIzaSyAxxxxx...",
+      authDomain: "msite-inventory.firebaseapp.com",
+      projectId: "msite-inventory",
+      storageBucket: "msite-inventory.appspot.com",
+      messagingSenderId: "1234567890",
+      appId: "1:1234567890:web:abcdef123456"
+    }};
+
+    // Initialize Firebase
+    const app = firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // Collections and local state
+    let stockData = JSON.parse(localStorage.getItem('stockData') || '[]');
+    let stockQueue = JSON.parse(localStorage.getItem('stockQueue') || '[]'); // offline changes pending upload
+    const stockCol = db.collection('stock');
+
+    function escapeHtml(str){ if(!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function saveLocalStock(){ localStorage.setItem('stockData', JSON.stringify(stockData)); }
+    function saveQueue(){ localStorage.setItem('stockQueue', JSON.stringify(stockQueue)); }
+
+    function renderStock(){
+      const tbody = document.getElementById('stockTableBody');
+      tbody.innerHTML = '';
+      stockData.forEach((item, idx)=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td contenteditable="true" data-key="name">${escapeHtml(item.name)}</td>
+                        <td contenteditable="true" data-key="qty">${item.qty}</td>
+                        <td contenteditable="true" data-key="unit">${escapeHtml(item.unit||'')}</td>
+                        <td contenteditable="true" data-key="price">${Number(item.price).toFixed(2)}</td>
+                        <td><button class="action-btn" data-idx="${idx}">Delete</button></td>`;
+        Array.from(tr.querySelectorAll('[contenteditable]')).forEach(cell=>{
+          cell.addEventListener('blur', async (e)=>{
+            const key = cell.getAttribute('data-key');
+            let val = cell.textContent.trim();
+            if(key === 'qty' || key === 'price'){ val = Number(val) || 0; }
+            stockData[idx][key] = val;
+            saveLocalStock();
+            if(stockData[idx].id){
+              try{ await stockCol.doc(stockData[idx].id).update(stockData[idx]); }
+              catch(err){ queueUpdate('update', stockData[idx]); }
+            } else {
+              queueUpdate('add', stockData[idx]);
+              renderStock();
+              processQueueIfOnline();
+            }
+          });
+        });
+        tr.querySelector('button').addEventListener('click', async ()=>{
+          if(!confirm('Delete this item?')) return;
+          const item = stockData[idx];
+          stockData.splice(idx,1);
+          saveLocalStock();
+          renderStock();
+          if(item.id){
+            try{ await stockCol.doc(item.id).delete(); }
+            catch(err){ queueUpdate('delete', item); }
+          }
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    function queueUpdate(action, payload){
+      stockQueue.push({ action, payload, ts: Date.now() });
+      saveQueue();
+      console.warn('Queued operation (offline):', action, payload);
+    }
+
+    document.getElementById('addStockBtn').addEventListener('click', async ()=>{
+      const name = document.getElementById('stock-name').value.trim();
+      const qty = Number(document.getElementById('stock-qty').value);
+      const unit = document.getElementById('stock-unit').value.trim();
+      const price = Number(document.getElementById('stock-price').value);
+      if(!name || isNaN(qty) || isNaN(price)) return alert('Enter valid name, qty and price');
+      const item = {{ name: name, qty: qty, unit: unit, price: price }};
+      stockData.push(item);
+      saveLocalStock();
+      renderStock();
+      document.getElementById('stock-name').value=''; document.getElementById('stock-qty').value=''; document.getElementById('stock-unit').value=''; document.getElementById('stock-price').value='';
+      try{
+        const docRef = await stockCol.add(item);
+        const idx = stockData.findIndex(s=> s.name===item.name && s.qty===item.qty && !s.id);
+        if(idx>=0){ stockData[idx].id = docRef.id; saveLocalStock(); renderStock(); }
+      }catch(err){
+        queueUpdate('add', item);
+      }
+    });
+
+    document.getElementById('syncBtn').addEventListener('click', () => { processQueueIfOnline(); alert('Sync requested'); });
+
+    async function processQueueIfOnline(){
+      if(!navigator.onLine) return console.warn('Offline — cannot process queue yet');
+      if(stockQueue.length===0) return;
+      // Work on a copy
+      const q = JSON.parse(JSON.stringify(stockQueue));
+      for(const op of q){
+        try{
+          if(op.action==='add'){
+            const docRef = await stockCol.add(op.payload);
+            const idx = stockData.findIndex(s=> s.name===op.payload.name && s.qty===op.payload.qty && !s.id);
+            if(idx>=0){ stockData[idx].id = docRef.id; saveLocalStock(); }
+          } else if(op.action==='update'){
+            if(op.payload.id) await stockCol.doc(op.payload.id).update(op.payload);
+          } else if(op.action==='delete'){
+            if(op.payload.id) await stockCol.doc(op.payload.id).delete();
+          }
+          stockQueue.shift();
+          saveQueue();
+        }catch(err){
+          console.error('Error processing queue op',op,err);
+          break;
+        }
+      }
+    }
+
+    window.addEventListener('online', () => {
+      console.info('Back online — processing queue and reloading cloud state');
+      processQueueIfOnline();
+    });
+
+    let unsubscribeSnapshot = null;
+    async function startCloudListener(){
+      try{
+        unsubscribeSnapshot = stockCol.onSnapshot(snapshot=>{
+          const cloudItems = [];
+          snapshot.forEach(doc=>{
+            cloudItems.push(Object.assign({id:doc.id}, doc.data()));
+          });
+          if(cloudItems.length>0){
+            stockData = cloudItems;
+            saveLocalStock();
+            renderStock();
+          } else {
+            renderStock();
+          }
+        }, err=>{
+          console.warn('onSnapshot error', err);
+        });
+      }catch(err){
+        console.warn('Could not start snapshot listener (probably offline):', err);
+        renderStock();
+      }
+    }
+
+    (function init(){
+      if(navigator.onLine){
+        startCloudListener();
+        processQueueIfOnline();
+      } else {
+        console.info('App offline — loading local stock only');
+        stockData = JSON.parse(localStorage.getItem('stockData') || '[]');
+        renderStock();
+      }
+    })();
+
+    document.getElementById('stock-search').addEventListener('input', function(){
+      const q = this.value.toLowerCase();
+      const tbody = document.getElementById('stockTableBody');
+      Array.from(tbody.rows).forEach(row=>{
+        const name = row.cells[0].textContent.toLowerCase();
+        row.style.display = name.includes(q) ? '' : 'none';
+      });
+    });
+
+    document.querySelectorAll('.menu-link').forEach(link=>{
+      link.addEventListener('click', (e)=>{
+        e.preventDefault();
+        document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+        const sec = document.getElementById(link.dataset.section);
+        if(sec) sec.classList.add('active');
+      });
+    });
+
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('service-worker.js').then(()=>console.log('SW registered')).catch(err=>console.warn('SW reg failed',err));
+    }
+  </script>
+</body>
+</html>
