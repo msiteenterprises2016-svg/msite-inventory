@@ -1,5 +1,5 @@
 
-const CACHE_NAME = 'msite-cache-v1';
+const CACHE_NAME = 'msite-cache-v2';
 const urlsToCache = [
   './',
   './index.html',
@@ -20,12 +20,8 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).catch(() => caches.match('./index.html'))
-    );
+    event.respondWith(fetch(req).catch(() => caches.match('./index.html')));
     return;
   }
-  event.respondWith(
-    caches.match(req).then(res => res || fetch(req))
-  );
+  event.respondWith(caches.match(req).then(res => res || fetch(req)));
 });

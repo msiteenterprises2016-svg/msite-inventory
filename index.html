@@ -1041,97 +1041,76 @@ function printBuyList() {
   w.document.write('<html><head><title>Buy List</title></head><body>');
   w.document.write(html);
   w.document.write('
-<!-- FIREBASE + SYNC LOGIC (injected by ChatGPT) -->
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js"></script>
+<!-- Firebase compat SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  // Firebase config (from user)
   const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  const app = firebase.initializeApp(firebaseConfig);
+  firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
-  // STOCK SYNC: keep localStorage as source of truth for offline, but upload local items if cloud empty.
+  // === Firestore Auto Sync Logic ===
   let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
   const stockCol = db.collection('stock');
 
-  // Utility: save local
-  function saveLocal(){ localStorage.setItem('stockData', JSON.stringify(localStock)); }
+  function saveLocal() {
+    localStorage.setItem('stockData', JSON.stringify(localStock));
+  }
 
-  // Upload local items that lack cloud ids
-  async function uploadLocalPending(){
+  async function uploadLocalPending() {
     if(!navigator.onLine) return;
-    try{
+    try {
       const snapshot = await stockCol.get();
-      // If cloud empty and local has items, upload them
-      if(snapshot.empty && localStock.length>0){
-        for(const item of localStock){
-          try{
-            const docRef = await stockCol.add(item);
-            // store cloud id locally (best-effort match by name+qty)
-            item.id = docRef.id;
-          }catch(e){ console.warn('uploadLocalPending add failed', e); }
+      if(snapshot.empty && localStock.length>0) {
+        for(const item of localStock) {
+          const docRef = await stockCol.add(item);
+          item.id = docRef.id;
         }
         saveLocal();
       }
-    }catch(e){
+    } catch(e) {
       console.warn('uploadLocalPending failed', e);
     }
   }
 
-  // Listen to cloud changes and merge (cloud wins for simplicity)
-  function startCloudListener(){
-    try{
-      stockCol.onSnapshot(snapshot=>{
-        const cloudItems = [];
-        snapshot.forEach(doc=> cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-        if(cloudItems.length>0){
-          // merge: prefer cloud, but keep local-only items appended
-          const localOnly = localStock.filter(function(ls){ return !cloudItems.some(function(ci){ return ci.name===ls.name && ci.qty===ls.qty; }); });
-          localStock = cloudItems.concat(localOnly);
-          saveLocal();
-          if(typeof renderStock === 'function') renderStock();
-          if(typeof updateItemLists === 'function') updateItemLists();
-        } else {
-          if(typeof renderStock === 'function') renderStock();
-        }
-      }, err=> console.warn('onSnapshot error', err));
-    }catch(e){
-      console.warn('startCloudListener failed (probably offline)', e);
-    }
+  function startCloudListener() {
+    stockCol.onSnapshot(snapshot => {
+      const cloudItems = [];
+      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
+      if(cloudItems.length>0) {
+        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
+        localStock = cloudItems.concat(localOnly);
+        saveLocal();
+        if(typeof renderStock === 'function') renderStock();
+      }
+    });
   }
 
-  // When back online, upload any local items missing an id
-  window.addEventListener('online', async function(){
-    console.info('Back online — attempting to sync local stock to Firestore...');
-    try{
-      var local = JSON.parse(localStorage.getItem('stockData')||'[]');
-      for(var i=0;i<local.length;i++){
-        var item = local[i];
-        if(!item.id){
-          try{
-            var docRef = await stockCol.add({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 });
-            item.id = docRef.id;
-          }catch(e){ console.warn('add failed', e); }
+  window.addEventListener('online', async () => {
+    console.info('Online: syncing local stock to Firestore...');
+    try {
+      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+      for(const item of local) {
+        if(!item.id) {
+          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
+          item.id = docRef.id;
         } else {
-          try{ await stockCol.doc(item.id).set({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 }); }catch(e){}
+          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
         }
       }
       localStorage.setItem('stockData', JSON.stringify(local));
-    }catch(e){ console.warn('Error syncing on online', e); }
+    } catch(e) { console.warn('Error syncing online', e); }
     startCloudListener();
   });
 
-  (function initSync(){
-    try{
-      if(navigator.onLine){
-        uploadLocalPending().then(function(){ startCloudListener(); });
-      } else {
-        console.info('Offline at init — using local data for now');
-      }
-    }catch(e){ console.warn('initSync err', e); }
+  (function initSync() {
+    if(navigator.onLine) {
+      uploadLocalPending().then(() => startCloudListener());
+    } else {
+      console.info('Offline at init, using local data');
+    }
   })();
 </script>
-<!-- END FIREBASE INJECTION -->
 
 </body></html>');
   w.document.close();
@@ -1537,97 +1516,76 @@ function confirmBuyList() {
         <div class="preview-wrap">${receiptHTML}</div>
         ${script}
       
-<!-- FIREBASE + SYNC LOGIC (injected by ChatGPT) -->
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js"></script>
+<!-- Firebase compat SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  // Firebase config (from user)
   const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  const app = firebase.initializeApp(firebaseConfig);
+  firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
-  // STOCK SYNC: keep localStorage as source of truth for offline, but upload local items if cloud empty.
+  // === Firestore Auto Sync Logic ===
   let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
   const stockCol = db.collection('stock');
 
-  // Utility: save local
-  function saveLocal(){ localStorage.setItem('stockData', JSON.stringify(localStock)); }
+  function saveLocal() {
+    localStorage.setItem('stockData', JSON.stringify(localStock));
+  }
 
-  // Upload local items that lack cloud ids
-  async function uploadLocalPending(){
+  async function uploadLocalPending() {
     if(!navigator.onLine) return;
-    try{
+    try {
       const snapshot = await stockCol.get();
-      // If cloud empty and local has items, upload them
-      if(snapshot.empty && localStock.length>0){
-        for(const item of localStock){
-          try{
-            const docRef = await stockCol.add(item);
-            // store cloud id locally (best-effort match by name+qty)
-            item.id = docRef.id;
-          }catch(e){ console.warn('uploadLocalPending add failed', e); }
+      if(snapshot.empty && localStock.length>0) {
+        for(const item of localStock) {
+          const docRef = await stockCol.add(item);
+          item.id = docRef.id;
         }
         saveLocal();
       }
-    }catch(e){
+    } catch(e) {
       console.warn('uploadLocalPending failed', e);
     }
   }
 
-  // Listen to cloud changes and merge (cloud wins for simplicity)
-  function startCloudListener(){
-    try{
-      stockCol.onSnapshot(snapshot=>{
-        const cloudItems = [];
-        snapshot.forEach(doc=> cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-        if(cloudItems.length>0){
-          // merge: prefer cloud, but keep local-only items appended
-          const localOnly = localStock.filter(function(ls){ return !cloudItems.some(function(ci){ return ci.name===ls.name && ci.qty===ls.qty; }); });
-          localStock = cloudItems.concat(localOnly);
-          saveLocal();
-          if(typeof renderStock === 'function') renderStock();
-          if(typeof updateItemLists === 'function') updateItemLists();
-        } else {
-          if(typeof renderStock === 'function') renderStock();
-        }
-      }, err=> console.warn('onSnapshot error', err));
-    }catch(e){
-      console.warn('startCloudListener failed (probably offline)', e);
-    }
+  function startCloudListener() {
+    stockCol.onSnapshot(snapshot => {
+      const cloudItems = [];
+      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
+      if(cloudItems.length>0) {
+        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
+        localStock = cloudItems.concat(localOnly);
+        saveLocal();
+        if(typeof renderStock === 'function') renderStock();
+      }
+    });
   }
 
-  // When back online, upload any local items missing an id
-  window.addEventListener('online', async function(){
-    console.info('Back online — attempting to sync local stock to Firestore...');
-    try{
-      var local = JSON.parse(localStorage.getItem('stockData')||'[]');
-      for(var i=0;i<local.length;i++){
-        var item = local[i];
-        if(!item.id){
-          try{
-            var docRef = await stockCol.add({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 });
-            item.id = docRef.id;
-          }catch(e){ console.warn('add failed', e); }
+  window.addEventListener('online', async () => {
+    console.info('Online: syncing local stock to Firestore...');
+    try {
+      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+      for(const item of local) {
+        if(!item.id) {
+          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
+          item.id = docRef.id;
         } else {
-          try{ await stockCol.doc(item.id).set({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 }); }catch(e){}
+          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
         }
       }
       localStorage.setItem('stockData', JSON.stringify(local));
-    }catch(e){ console.warn('Error syncing on online', e); }
+    } catch(e) { console.warn('Error syncing online', e); }
     startCloudListener();
   });
 
-  (function initSync(){
-    try{
-      if(navigator.onLine){
-        uploadLocalPending().then(function(){ startCloudListener(); });
-      } else {
-        console.info('Offline at init — using local data for now');
-      }
-    }catch(e){ console.warn('initSync err', e); }
+  (function initSync() {
+    if(navigator.onLine) {
+      uploadLocalPending().then(() => startCloudListener());
+    } else {
+      console.info('Offline at init, using local data');
+    }
   })();
 </script>
-<!-- END FIREBASE INJECTION -->
 
 </body></html>`);
       w.document.close();
@@ -1657,97 +1615,76 @@ function confirmBuyList() {
   const html = document.getElementById('cashout-receipt').innerHTML;
   const w = window.open('', '_blank');
   w.document.write(`<html><head><title>Print</title></head><body>${html}
-<!-- FIREBASE + SYNC LOGIC (injected by ChatGPT) -->
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js"></script>
+<!-- Firebase compat SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  // Firebase config (from user)
   const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  const app = firebase.initializeApp(firebaseConfig);
+  firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
-  // STOCK SYNC: keep localStorage as source of truth for offline, but upload local items if cloud empty.
+  // === Firestore Auto Sync Logic ===
   let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
   const stockCol = db.collection('stock');
 
-  // Utility: save local
-  function saveLocal(){ localStorage.setItem('stockData', JSON.stringify(localStock)); }
+  function saveLocal() {
+    localStorage.setItem('stockData', JSON.stringify(localStock));
+  }
 
-  // Upload local items that lack cloud ids
-  async function uploadLocalPending(){
+  async function uploadLocalPending() {
     if(!navigator.onLine) return;
-    try{
+    try {
       const snapshot = await stockCol.get();
-      // If cloud empty and local has items, upload them
-      if(snapshot.empty && localStock.length>0){
-        for(const item of localStock){
-          try{
-            const docRef = await stockCol.add(item);
-            // store cloud id locally (best-effort match by name+qty)
-            item.id = docRef.id;
-          }catch(e){ console.warn('uploadLocalPending add failed', e); }
+      if(snapshot.empty && localStock.length>0) {
+        for(const item of localStock) {
+          const docRef = await stockCol.add(item);
+          item.id = docRef.id;
         }
         saveLocal();
       }
-    }catch(e){
+    } catch(e) {
       console.warn('uploadLocalPending failed', e);
     }
   }
 
-  // Listen to cloud changes and merge (cloud wins for simplicity)
-  function startCloudListener(){
-    try{
-      stockCol.onSnapshot(snapshot=>{
-        const cloudItems = [];
-        snapshot.forEach(doc=> cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-        if(cloudItems.length>0){
-          // merge: prefer cloud, but keep local-only items appended
-          const localOnly = localStock.filter(function(ls){ return !cloudItems.some(function(ci){ return ci.name===ls.name && ci.qty===ls.qty; }); });
-          localStock = cloudItems.concat(localOnly);
-          saveLocal();
-          if(typeof renderStock === 'function') renderStock();
-          if(typeof updateItemLists === 'function') updateItemLists();
-        } else {
-          if(typeof renderStock === 'function') renderStock();
-        }
-      }, err=> console.warn('onSnapshot error', err));
-    }catch(e){
-      console.warn('startCloudListener failed (probably offline)', e);
-    }
+  function startCloudListener() {
+    stockCol.onSnapshot(snapshot => {
+      const cloudItems = [];
+      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
+      if(cloudItems.length>0) {
+        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
+        localStock = cloudItems.concat(localOnly);
+        saveLocal();
+        if(typeof renderStock === 'function') renderStock();
+      }
+    });
   }
 
-  // When back online, upload any local items missing an id
-  window.addEventListener('online', async function(){
-    console.info('Back online — attempting to sync local stock to Firestore...');
-    try{
-      var local = JSON.parse(localStorage.getItem('stockData')||'[]');
-      for(var i=0;i<local.length;i++){
-        var item = local[i];
-        if(!item.id){
-          try{
-            var docRef = await stockCol.add({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 });
-            item.id = docRef.id;
-          }catch(e){ console.warn('add failed', e); }
+  window.addEventListener('online', async () => {
+    console.info('Online: syncing local stock to Firestore...');
+    try {
+      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+      for(const item of local) {
+        if(!item.id) {
+          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
+          item.id = docRef.id;
         } else {
-          try{ await stockCol.doc(item.id).set({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 }); }catch(e){}
+          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
         }
       }
       localStorage.setItem('stockData', JSON.stringify(local));
-    }catch(e){ console.warn('Error syncing on online', e); }
+    } catch(e) { console.warn('Error syncing online', e); }
     startCloudListener();
   });
 
-  (function initSync(){
-    try{
-      if(navigator.onLine){
-        uploadLocalPending().then(function(){ startCloudListener(); });
-      } else {
-        console.info('Offline at init — using local data for now');
-      }
-    }catch(e){ console.warn('initSync err', e); }
+  (function initSync() {
+    if(navigator.onLine) {
+      uploadLocalPending().then(() => startCloudListener());
+    } else {
+      console.info('Offline at init, using local data');
+    }
   })();
 </script>
-<!-- END FIREBASE INJECTION -->
 
 </body></html>`);
   w.document.close();
@@ -1883,97 +1820,76 @@ function confirmBuyList() {
   const html = container.innerHTML;
   const w = window.open('', '_blank');
   w.document.write(`<html><head><title>Print</title></head><body>${html}
-<!-- FIREBASE + SYNC LOGIC (injected by ChatGPT) -->
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js"></script>
+<!-- Firebase compat SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  // Firebase config (from user)
   const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  const app = firebase.initializeApp(firebaseConfig);
+  firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
-  // STOCK SYNC: keep localStorage as source of truth for offline, but upload local items if cloud empty.
+  // === Firestore Auto Sync Logic ===
   let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
   const stockCol = db.collection('stock');
 
-  // Utility: save local
-  function saveLocal(){ localStorage.setItem('stockData', JSON.stringify(localStock)); }
+  function saveLocal() {
+    localStorage.setItem('stockData', JSON.stringify(localStock));
+  }
 
-  // Upload local items that lack cloud ids
-  async function uploadLocalPending(){
+  async function uploadLocalPending() {
     if(!navigator.onLine) return;
-    try{
+    try {
       const snapshot = await stockCol.get();
-      // If cloud empty and local has items, upload them
-      if(snapshot.empty && localStock.length>0){
-        for(const item of localStock){
-          try{
-            const docRef = await stockCol.add(item);
-            // store cloud id locally (best-effort match by name+qty)
-            item.id = docRef.id;
-          }catch(e){ console.warn('uploadLocalPending add failed', e); }
+      if(snapshot.empty && localStock.length>0) {
+        for(const item of localStock) {
+          const docRef = await stockCol.add(item);
+          item.id = docRef.id;
         }
         saveLocal();
       }
-    }catch(e){
+    } catch(e) {
       console.warn('uploadLocalPending failed', e);
     }
   }
 
-  // Listen to cloud changes and merge (cloud wins for simplicity)
-  function startCloudListener(){
-    try{
-      stockCol.onSnapshot(snapshot=>{
-        const cloudItems = [];
-        snapshot.forEach(doc=> cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-        if(cloudItems.length>0){
-          // merge: prefer cloud, but keep local-only items appended
-          const localOnly = localStock.filter(function(ls){ return !cloudItems.some(function(ci){ return ci.name===ls.name && ci.qty===ls.qty; }); });
-          localStock = cloudItems.concat(localOnly);
-          saveLocal();
-          if(typeof renderStock === 'function') renderStock();
-          if(typeof updateItemLists === 'function') updateItemLists();
-        } else {
-          if(typeof renderStock === 'function') renderStock();
-        }
-      }, err=> console.warn('onSnapshot error', err));
-    }catch(e){
-      console.warn('startCloudListener failed (probably offline)', e);
-    }
+  function startCloudListener() {
+    stockCol.onSnapshot(snapshot => {
+      const cloudItems = [];
+      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
+      if(cloudItems.length>0) {
+        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
+        localStock = cloudItems.concat(localOnly);
+        saveLocal();
+        if(typeof renderStock === 'function') renderStock();
+      }
+    });
   }
 
-  // When back online, upload any local items missing an id
-  window.addEventListener('online', async function(){
-    console.info('Back online — attempting to sync local stock to Firestore...');
-    try{
-      var local = JSON.parse(localStorage.getItem('stockData')||'[]');
-      for(var i=0;i<local.length;i++){
-        var item = local[i];
-        if(!item.id){
-          try{
-            var docRef = await stockCol.add({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 });
-            item.id = docRef.id;
-          }catch(e){ console.warn('add failed', e); }
+  window.addEventListener('online', async () => {
+    console.info('Online: syncing local stock to Firestore...');
+    try {
+      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+      for(const item of local) {
+        if(!item.id) {
+          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
+          item.id = docRef.id;
         } else {
-          try{ await stockCol.doc(item.id).set({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 }); }catch(e){}
+          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
         }
       }
       localStorage.setItem('stockData', JSON.stringify(local));
-    }catch(e){ console.warn('Error syncing on online', e); }
+    } catch(e) { console.warn('Error syncing online', e); }
     startCloudListener();
   });
 
-  (function initSync(){
-    try{
-      if(navigator.onLine){
-        uploadLocalPending().then(function(){ startCloudListener(); });
-      } else {
-        console.info('Offline at init — using local data for now');
-      }
-    }catch(e){ console.warn('initSync err', e); }
+  (function initSync() {
+    if(navigator.onLine) {
+      uploadLocalPending().then(() => startCloudListener());
+    } else {
+      console.info('Offline at init, using local data');
+    }
   })();
 </script>
-<!-- END FIREBASE INJECTION -->
 
 </body></html>`);
   w.document.close();
@@ -2112,97 +2028,76 @@ function printStockTable() {
           Printed on: ${new Date().toLocaleString()}
         </div>
       
-<!-- FIREBASE + SYNC LOGIC (injected by ChatGPT) -->
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js"></script>
+<!-- Firebase compat SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  // Firebase config (from user)
   const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  const app = firebase.initializeApp(firebaseConfig);
+  firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
-  // STOCK SYNC: keep localStorage as source of truth for offline, but upload local items if cloud empty.
+  // === Firestore Auto Sync Logic ===
   let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
   const stockCol = db.collection('stock');
 
-  // Utility: save local
-  function saveLocal(){ localStorage.setItem('stockData', JSON.stringify(localStock)); }
+  function saveLocal() {
+    localStorage.setItem('stockData', JSON.stringify(localStock));
+  }
 
-  // Upload local items that lack cloud ids
-  async function uploadLocalPending(){
+  async function uploadLocalPending() {
     if(!navigator.onLine) return;
-    try{
+    try {
       const snapshot = await stockCol.get();
-      // If cloud empty and local has items, upload them
-      if(snapshot.empty && localStock.length>0){
-        for(const item of localStock){
-          try{
-            const docRef = await stockCol.add(item);
-            // store cloud id locally (best-effort match by name+qty)
-            item.id = docRef.id;
-          }catch(e){ console.warn('uploadLocalPending add failed', e); }
+      if(snapshot.empty && localStock.length>0) {
+        for(const item of localStock) {
+          const docRef = await stockCol.add(item);
+          item.id = docRef.id;
         }
         saveLocal();
       }
-    }catch(e){
+    } catch(e) {
       console.warn('uploadLocalPending failed', e);
     }
   }
 
-  // Listen to cloud changes and merge (cloud wins for simplicity)
-  function startCloudListener(){
-    try{
-      stockCol.onSnapshot(snapshot=>{
-        const cloudItems = [];
-        snapshot.forEach(doc=> cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-        if(cloudItems.length>0){
-          // merge: prefer cloud, but keep local-only items appended
-          const localOnly = localStock.filter(function(ls){ return !cloudItems.some(function(ci){ return ci.name===ls.name && ci.qty===ls.qty; }); });
-          localStock = cloudItems.concat(localOnly);
-          saveLocal();
-          if(typeof renderStock === 'function') renderStock();
-          if(typeof updateItemLists === 'function') updateItemLists();
-        } else {
-          if(typeof renderStock === 'function') renderStock();
-        }
-      }, err=> console.warn('onSnapshot error', err));
-    }catch(e){
-      console.warn('startCloudListener failed (probably offline)', e);
-    }
+  function startCloudListener() {
+    stockCol.onSnapshot(snapshot => {
+      const cloudItems = [];
+      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
+      if(cloudItems.length>0) {
+        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
+        localStock = cloudItems.concat(localOnly);
+        saveLocal();
+        if(typeof renderStock === 'function') renderStock();
+      }
+    });
   }
 
-  // When back online, upload any local items missing an id
-  window.addEventListener('online', async function(){
-    console.info('Back online — attempting to sync local stock to Firestore...');
-    try{
-      var local = JSON.parse(localStorage.getItem('stockData')||'[]');
-      for(var i=0;i<local.length;i++){
-        var item = local[i];
-        if(!item.id){
-          try{
-            var docRef = await stockCol.add({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 });
-            item.id = docRef.id;
-          }catch(e){ console.warn('add failed', e); }
+  window.addEventListener('online', async () => {
+    console.info('Online: syncing local stock to Firestore...');
+    try {
+      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+      for(const item of local) {
+        if(!item.id) {
+          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
+          item.id = docRef.id;
         } else {
-          try{ await stockCol.doc(item.id).set({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 }); }catch(e){}
+          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
         }
       }
       localStorage.setItem('stockData', JSON.stringify(local));
-    }catch(e){ console.warn('Error syncing on online', e); }
+    } catch(e) { console.warn('Error syncing online', e); }
     startCloudListener();
   });
 
-  (function initSync(){
-    try{
-      if(navigator.onLine){
-        uploadLocalPending().then(function(){ startCloudListener(); });
-      } else {
-        console.info('Offline at init — using local data for now');
-      }
-    }catch(e){ console.warn('initSync err', e); }
+  (function initSync() {
+    if(navigator.onLine) {
+      uploadLocalPending().then(() => startCloudListener());
+    } else {
+      console.info('Offline at init, using local data');
+    }
   })();
 </script>
-<!-- END FIREBASE INJECTION -->
 
 </body>
     </html>
@@ -2219,7 +2114,7 @@ document.getElementById("toggleSidebar").addEventListener("click", () => {
   content.classList.toggle("sidebar-collapsed");
 });
 // Register service worker for PWA
-//SW_REG_START
+if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js')
     .then(() => console.log('Service Worker registered'))
     .catch(err => console.error('Service Worker registration failed:', err));
@@ -2228,104 +2123,83 @@ document.getElementById("toggleSidebar").addEventListener("click", () => {
 
 
   </script>
-//SW_REG_START
+if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js')
     .then(() => console.log('Service Worker ready'))
     .catch(err => console.error('SW failed:', err));
 }
 
 
-<!-- FIREBASE + SYNC LOGIC (injected by ChatGPT) -->
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js"></script>
+<!-- Firebase compat SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script>
-  // Firebase config (from user)
   const firebaseConfig = {"apiKey": "AIzaSyAxxxxx...", "authDomain": "msite-inventory.firebaseapp.com", "projectId": "msite-inventory", "storageBucket": "msite-inventory.appspot.com", "messagingSenderId": "1234567890", "appId": "1:1234567890:web:abcdef123456"};
-  const app = firebase.initializeApp(firebaseConfig);
+  firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
 
-  // STOCK SYNC: keep localStorage as source of truth for offline, but upload local items if cloud empty.
+  // === Firestore Auto Sync Logic ===
   let localStock = JSON.parse(localStorage.getItem('stockData') || '[]');
   const stockCol = db.collection('stock');
 
-  // Utility: save local
-  function saveLocal(){ localStorage.setItem('stockData', JSON.stringify(localStock)); }
+  function saveLocal() {
+    localStorage.setItem('stockData', JSON.stringify(localStock));
+  }
 
-  // Upload local items that lack cloud ids
-  async function uploadLocalPending(){
+  async function uploadLocalPending() {
     if(!navigator.onLine) return;
-    try{
+    try {
       const snapshot = await stockCol.get();
-      // If cloud empty and local has items, upload them
-      if(snapshot.empty && localStock.length>0){
-        for(const item of localStock){
-          try{
-            const docRef = await stockCol.add(item);
-            // store cloud id locally (best-effort match by name+qty)
-            item.id = docRef.id;
-          }catch(e){ console.warn('uploadLocalPending add failed', e); }
+      if(snapshot.empty && localStock.length>0) {
+        for(const item of localStock) {
+          const docRef = await stockCol.add(item);
+          item.id = docRef.id;
         }
         saveLocal();
       }
-    }catch(e){
+    } catch(e) {
       console.warn('uploadLocalPending failed', e);
     }
   }
 
-  // Listen to cloud changes and merge (cloud wins for simplicity)
-  function startCloudListener(){
-    try{
-      stockCol.onSnapshot(snapshot=>{
-        const cloudItems = [];
-        snapshot.forEach(doc=> cloudItems.push(Object.assign({id:doc.id}, doc.data())));
-        if(cloudItems.length>0){
-          // merge: prefer cloud, but keep local-only items appended
-          const localOnly = localStock.filter(function(ls){ return !cloudItems.some(function(ci){ return ci.name===ls.name && ci.qty===ls.qty; }); });
-          localStock = cloudItems.concat(localOnly);
-          saveLocal();
-          if(typeof renderStock === 'function') renderStock();
-          if(typeof updateItemLists === 'function') updateItemLists();
-        } else {
-          if(typeof renderStock === 'function') renderStock();
-        }
-      }, err=> console.warn('onSnapshot error', err));
-    }catch(e){
-      console.warn('startCloudListener failed (probably offline)', e);
-    }
+  function startCloudListener() {
+    stockCol.onSnapshot(snapshot => {
+      const cloudItems = [];
+      snapshot.forEach(doc => cloudItems.push(Object.assign({id:doc.id}, doc.data())));
+      if(cloudItems.length>0) {
+        const localOnly = localStock.filter(ls => !cloudItems.some(ci => ci.name===ls.name && ci.qty===ls.qty));
+        localStock = cloudItems.concat(localOnly);
+        saveLocal();
+        if(typeof renderStock === 'function') renderStock();
+      }
+    });
   }
 
-  // When back online, upload any local items missing an id
-  window.addEventListener('online', async function(){
-    console.info('Back online — attempting to sync local stock to Firestore...');
-    try{
-      var local = JSON.parse(localStorage.getItem('stockData')||'[]');
-      for(var i=0;i<local.length;i++){
-        var item = local[i];
-        if(!item.id){
-          try{
-            var docRef = await stockCol.add({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 });
-            item.id = docRef.id;
-          }catch(e){ console.warn('add failed', e); }
+  window.addEventListener('online', async () => {
+    console.info('Online: syncing local stock to Firestore...');
+    try {
+      const local = JSON.parse(localStorage.getItem('stockData') || '[]');
+      for(const item of local) {
+        if(!item.id) {
+          const docRef = await stockCol.add({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
+          item.id = docRef.id;
         } else {
-          try{ await stockCol.doc(item.id).set({ name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0 }); }catch(e){}
+          await stockCol.doc(item.id).set({name:item.name, qty:item.qty, unit:item.unit||'', price:item.price||0});
         }
       }
       localStorage.setItem('stockData', JSON.stringify(local));
-    }catch(e){ console.warn('Error syncing on online', e); }
+    } catch(e) { console.warn('Error syncing online', e); }
     startCloudListener();
   });
 
-  (function initSync(){
-    try{
-      if(navigator.onLine){
-        uploadLocalPending().then(function(){ startCloudListener(); });
-      } else {
-        console.info('Offline at init — using local data for now');
-      }
-    }catch(e){ console.warn('initSync err', e); }
+  (function initSync() {
+    if(navigator.onLine) {
+      uploadLocalPending().then(() => startCloudListener());
+    } else {
+      console.info('Offline at init, using local data');
+    }
   })();
 </script>
-<!-- END FIREBASE INJECTION -->
 
 </body>
 </html>
